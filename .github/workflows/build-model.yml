@@ -1,0 +1,73 @@
+# IME-Model(AIモデル配布用の公開リポジトリ)に置く、モデルを作って Releases に公開するワークフロー。
+# 公開の素材だけを使う: Hugging Face の元モデル(MIT)と llama.cpp(MIT)。アプリ本体のコードは使わない・含まない。
+# 手動実行(Actions → build-model → Run workflow)。同じ手順を再実行すれば、同じファイルが作れる。
+name: build-model
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'リリースのタグ(アプリはこのタグの URL からダウンロードする)'
+        type: string
+        default: 'v1'
+
+permissions:
+  contents: write
+
+env:
+  MODEL_ID: sbintuitions/sarashina2.2-0.5b
+  # アプリ(Flick Lab)の推論層が対応している llama.cpp の版。変換・量子化もこの版で行う
+  LLAMA_CPP_COMMIT: 0c1e57098bba43ac29e6e3b677cdceebdd22334f
+  OUT_NAME: sarashina2.2-0.5b-q4_0.gguf
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: llama.cpp(固定コミット)を取得
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git llama.cpp
+          git -C llama.cpp checkout "$LLAMA_CPP_COMMIT"
+          git -C llama.cpp log -1 --format='%H %cd'
+      - name: 変換用の依存
+        run: pip install -r llama.cpp/requirements/requirements-convert_hf_to_gguf.txt huggingface_hub
+      - name: 元モデルを取得(Hugging Face)
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          p = snapshot_download(repo_id=os.environ["MODEL_ID"], local_dir="hf",
+                                allow_patterns=["*.json", "*.model", "*.safetensors", "*.txt", "*.py", "LICENSE*", "README*"])
+          print(p)
+          PY
+          ls -la hf
+      - name: GGUF(f16)へ変換
+        run: python llama.cpp/convert_hf_to_gguf.py hf --outfile model-f16.gguf --outtype f16
+      - name: llama-quantize をビルド
+        run: |
+          set -euo pipefail
+          cmake -S llama.cpp -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+          cmake --build build --target llama-quantize -j"$(nproc)"
+      - name: 量子化(q4_0)
+        run: build/bin/llama-quantize model-f16.gguf "$OUT_NAME" Q4_0
+      - name: 確認とハッシュ
+        run: |
+          set -euo pipefail
+          test "$(head -c 4 "$OUT_NAME")" = "GGUF"
+          ls -la "$OUT_NAME"
+          sha256sum "$OUT_NAME" | tee SHA256SUMS.txt
+      - name: リリースに公開
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" --title "Sarashina2.2 0.5B (GGUF q4_0) $TAG" --notes-file RELEASE_NOTES.md "$OUT_NAME" SHA256SUMS.txt
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'
