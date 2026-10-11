@@ -24,7 +24,7 @@
 
 - 元モデル: SB Intuitions の Sarashina2.2 0.5B。ライセンスは **MIT**(上のモデルカードに記載)。このリポジトリのモデルファイルも、そのライセンスに従います。
 - 変換・量子化: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)の `convert_hf_to_gguf.py` と `llama-quantize`。使った版は `.github/workflows/build-model.yml` に固定しています。
-- 内容の改変はありません(形式の変換と量子化のみ)。量子化により、元モデルと出力が完全には一致しません。
+- 元モデルからの変更点: 0.5B は形式の変換と量子化のみ。150M はそれに加えて、元モデルに tokenizer.model が無く tokenizer.json だけなので、その語彙とスコアから SentencePiece 形式の tokenizer.model を作って変換に使っています(語彙・スコアは元のまま。`tools/hf_unigram_to_spm.py`)。どちらも重みの中身は変えていません。量子化により、元モデルと出力が完全には一致しません。
 - **作り方は公開されています**: `.github/workflows/build-model.yml`(Actions の手動実行)で、誰でも同じファイルを作れます。
 
 ## 使い方
