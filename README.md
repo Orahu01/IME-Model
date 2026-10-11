@@ -9,6 +9,15 @@
 | `sarashina2.2-0.5b-q4_0.gguf` | [sbintuitions/sarashina2.2-0.5b](https://huggingface.co/sbintuitions/sarashina2.2-0.5b) を llama.cpp で GGUF に変換し、q4_0 に量子化したもの(約480MB) |
 | `SHA256SUMS.txt` | 上のファイルの SHA-256 |
 
+軽いモデルは、別のリリース(タグ `llm-jp-3-150m-v1`)にあります。
+
+| ファイル | 説明 |
+|---|---|
+| `llm-jp-3-150m-q4_0.gguf` | [llm-jp/llm-jp-3-150m](https://huggingface.co/llm-jp/llm-jp-3-150m)(Apache-2.0)を同じ手順で GGUF に変換し、q4_0 に量子化したもの(約95MB)。誤字補正用 |
+| `SHA256SUMS.txt` / `SOURCE.txt` / `LICENSE-llm-jp-3-150m.txt` | ハッシュ / 元モデルと llama.cpp の版 / 元モデルのライセンス文 |
+
+作り方は `.github/workflows/build-model-150m.yml`(Actions の手動実行)です。トークナイザの変換に `tools/hf_unigram_to_spm.py` を使います。
+
 ファイルは **Releases** にあります(ログイン不要で誰でも落とせます)。
 
 ## ライセンスと出どころ

@@ -1,0 +1,94 @@
+# 軽いモデル(llm-jp-3-150m)を GGUF(q4_0)にして Releases に公開するワークフロー。誤字補正「もしかして」用。
+# 公開の素材だけを使う: Hugging Face の元モデル(Apache-2.0)と llama.cpp(MIT)。アプリ本体のコードは使わない・含まない。
+# 手動実行(Actions → build-model-150m → Run workflow)。同じ手順を再実行すれば、同じファイルが作れる。
+# 注意: 0.5B 用の build-model.yml とは別のタグに公開する。タグを消して作り直す処理があるので、同じタグを指定すると別のモデルのリリースを壊す。
+name: build-model-150m
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'リリースのタグ(0.5B 用の v1 とは別にすること)'
+        type: string
+        default: 'llm-jp-3-150m-v1'
+      revision:
+        description: '元モデルの Hugging Face のリビジョン(ブランチ名・タグ・コミット)。作ったときの実際のコミットは SOURCE.txt に残る'
+        type: string
+        default: 'main'
+
+permissions:
+  contents: write
+
+env:
+  MODEL_ID: llm-jp/llm-jp-3-150m
+  # アプリ(Flick Lab)の推論層が対応している llama.cpp の版。変換・量子化もこの版で行う(0.5B と同じ)
+  LLAMA_CPP_COMMIT: 0c1e57098bba43ac29e6e3b677cdceebdd22334f
+  OUT_NAME: llm-jp-3-150m-q4_0.gguf
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: llama.cpp(固定コミット)を取得
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git llama.cpp
+          git -C llama.cpp checkout "$LLAMA_CPP_COMMIT"
+          git -C llama.cpp log -1 --format='%H %cd'
+      - name: 変換用の依存
+        run: pip install -r llama.cpp/requirements/requirements-convert_hf_to_gguf.txt huggingface_hub
+      - name: 元モデルを取得(Hugging Face)
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi, snapshot_download
+          rev = os.environ["REVISION"]
+          sha = HfApi().model_info(os.environ["MODEL_ID"], revision=rev).sha
+          print("元モデルのコミット:", sha)
+          p = snapshot_download(repo_id=os.environ["MODEL_ID"], revision=sha, local_dir="hf",
+                                allow_patterns=["*.json", "*.model", "*.safetensors", "*.txt", "*.py", "LICENSE*", "README*"])
+          print(p)
+          with open("SOURCE.txt", "w", encoding="utf-8") as f:
+              f.write(f"model: {os.environ['MODEL_ID']}\nrevision: {sha}\nllama.cpp: {os.environ['LLAMA_CPP_COMMIT']}\n")
+          PY
+          ls -la hf
+          cat SOURCE.txt
+      - name: tokenizer.model を作る(tokenizer.json が Unigram で tokenizer.model が無いので)
+        run: python tools/hf_unigram_to_spm.py hf
+      - name: GGUF(f16)へ変換
+        run: python llama.cpp/convert_hf_to_gguf.py hf --outfile model-f16.gguf --outtype f16
+      - name: llama-quantize をビルド
+        run: |
+          set -euo pipefail
+          cmake -S llama.cpp -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+          cmake --build build --target llama-quantize -j"$(nproc)"
+      - name: 量子化(q4_0)
+        run: build/bin/llama-quantize model-f16.gguf "$OUT_NAME" Q4_0
+      - name: 確認とハッシュ
+        run: |
+          set -euo pipefail
+          test "$(head -c 4 "$OUT_NAME")" = "GGUF"
+          ls -la "$OUT_NAME"
+          # 元モデルのライセンス文があれば、そのまま添える
+          if ls hf/LICENSE* >/dev/null 2>&1; then cp "$(ls hf/LICENSE* | head -n1)" LICENSE-llm-jp-3-150m.txt; fi
+          sha256sum "$OUT_NAME" | tee SHA256SUMS.txt
+      - name: リリースに公開
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # 0.5B 用のタグを巻き込まないための確認
+          if [ "$TAG" = "v1" ]; then echo "タグ v1 は 0.5B 用です。別のタグを指定してください"; exit 1; fi
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          FILES=("$OUT_NAME" SHA256SUMS.txt SOURCE.txt)
+          if [ -f LICENSE-llm-jp-3-150m.txt ]; then FILES+=(LICENSE-llm-jp-3-150m.txt); fi
+          gh release create "$TAG" --title "llm-jp-3-150m (GGUF q4_0) $TAG" --notes-file RELEASE_NOTES_150M.md "${FILES[@]}"
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'
