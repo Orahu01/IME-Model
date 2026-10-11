@@ -50,13 +50,15 @@ jobs:
           import os
           from huggingface_hub import HfApi, snapshot_download
           rev = os.environ["REVISION"]
-          sha = HfApi().model_info(os.environ["MODEL_ID"], revision=rev).sha
-          print("元モデルのコミット:", sha)
+          info = HfApi().model_info(os.environ["MODEL_ID"], revision=rev)
+          sha = info.sha
+          lic = (info.card_data.license if info.card_data is not None else None) or "unknown"
+          print("元モデルのコミット:", sha, " ライセンス(モデルカード):", lic)
           p = snapshot_download(repo_id=os.environ["MODEL_ID"], revision=sha, local_dir="hf",
                                 allow_patterns=["*.json", "*.model", "*.safetensors", "*.txt", "*.py", "LICENSE*", "README*"])
           print(p)
           with open("SOURCE.txt", "w", encoding="utf-8") as f:
-              f.write(f"model: {os.environ['MODEL_ID']}\nrevision: {sha}\nllama.cpp: {os.environ['LLAMA_CPP_COMMIT']}\n")
+              f.write(f"model: {os.environ['MODEL_ID']}\nrevision: {sha}\nlicense: {lic}\nllama.cpp: {os.environ['LLAMA_CPP_COMMIT']}\n")
           PY
           ls -la hf
           cat SOURCE.txt
@@ -87,8 +89,16 @@ jobs:
           set -euo pipefail
           # 0.5B 用のタグを巻き込まないための確認
           if [ "$TAG" = "v1" ]; then echo "タグ v1 は 0.5B 用です。別のタグを指定してください"; exit 1; fi
-          gh release delete "$TAG" --cleanup-tag --yes || true
+          # ライセンスは決め打ちせず、Hugging Face のモデルカードの値(SOURCE.txt)をノートに書く
+          LIC=$(grep '^license:' SOURCE.txt | cut -d' ' -f2-)
+          { cat RELEASE_NOTES_150M.md; echo "- 元モデルのライセンス(Hugging Face のモデルカードの記載): $LIC"; } > notes.md
           FILES=("$OUT_NAME" SHA256SUMS.txt SOURCE.txt)
           if [ -f LICENSE-llm-jp-3-150m.txt ]; then FILES+=(LICENSE-llm-jp-3-150m.txt); fi
-          gh release create "$TAG" --title "llm-jp-3-150m (GGUF q4_0) $TAG" --notes-file RELEASE_NOTES_150M.md "${FILES[@]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 同じタグがあるときは消さずに、ノートとファイルを更新する(消して作り直すと、作成が断られて空になることがある)
+            gh release edit "$TAG" --title "llm-jp-3-150m (GGUF q4_0) $TAG" --notes-file notes.md
+            gh release upload "$TAG" "${FILES[@]}" --clobber
+          else
+            gh release create "$TAG" --title "llm-jp-3-150m (GGUF q4_0) $TAG" --notes-file notes.md "${FILES[@]}"
+          fi
           gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'

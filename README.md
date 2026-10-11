@@ -13,8 +13,8 @@
 
 | ファイル | 説明 |
 |---|---|
-| `llm-jp-3-150m-q4_0.gguf` | [llm-jp/llm-jp-3-150m](https://huggingface.co/llm-jp/llm-jp-3-150m)(Apache-2.0)を同じ手順で GGUF に変換し、q4_0 に量子化したもの(約95MB)。誤字補正用 |
-| `SHA256SUMS.txt` / `SOURCE.txt` / `LICENSE-llm-jp-3-150m.txt` | ハッシュ / 元モデルと llama.cpp の版 / 元モデルのライセンス文 |
+| `llm-jp-3-150m-q4_0.gguf` | [llm-jp/llm-jp-3-150m](https://huggingface.co/llm-jp/llm-jp-3-150m)を同じ手順で GGUF に変換し、q4_0 に量子化したもの(約95MB)。誤字補正用 |
+| `SHA256SUMS.txt` / `SOURCE.txt` | ハッシュ / 元モデルのコミット・ライセンス(モデルカードの記載)・llama.cpp の版 |
 
 作り方は `.github/workflows/build-model-150m.yml`(Actions の手動実行)です。トークナイザの変換に `tools/hf_unigram_to_spm.py` を使います。
 
